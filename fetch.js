@@ -1,5 +1,6 @@
 import readline from 'readline';
 import axios from 'axios';
+import { parseStringPromise } from 'xml2js';
 
 // Create an interface to read user input
 const rl = readline.createInterface({
@@ -29,7 +30,7 @@ function initializeAuthorIdsVector() {
             function askForIds() {
                 if (count < size) {
                     rl.question(`Enter Google Scholar ID for author ${count + 1}: `, (googleScholarId) => {
-                        rl.question(`Enter DBLP author ID for author ${count + 1}: `, (dblpAuthorId) => {
+                        rl.question(`Enter DBLP author ID (PID) for author ${count + 1}: `, (dblpAuthorId) => {
                             // Store the input in the vector
                             authorIdsVector.push({
                                 googleScholarId: googleScholarId,
@@ -51,23 +52,50 @@ function initializeAuthorIdsVector() {
     });
 }
 
-// Function to fetch data from DBLP
-async function fetchDblpData(dblpAuthorId) {
+// Function to fetch publications from DBLP using PID
+async function fetchPublications(dblpAuthorId) {
+    const url = `https://dblp.org/pid/${dblpAuthorId}.xml`; // URL for the PID
     try {
-        const response = await axios.get(`https://dblp.org/search/publ/api?q=author:${dblpAuthorId}&format=json`);
-        console.log('DBLP API Response:', response.data);
-        if (response.data && response.data.result && response.data.result.hits && response.data.result.hits.hit) {
-            const data = response.data.result.hits.hit;
-            console.log(`DBLP Data for Author ID ${dblpAuthorId}:`, data);
-            return data;
-        } else {
-            console.log(`No data found for DBLP Author ID ${dblpAuthorId}`);
-            return null;
-        }
+        const response = await axios.get(url);
+        const xml = response.data;
+        const json = await parseStringPromise(xml, { explicitArray: false });
+        return extractPublications(json.dblpperson, dblpAuthorId); // Pass the dblpperson object
     } catch (error) {
-        console.error(`Error fetching DBLP data for ${dblpAuthorId}:`, error.response ? error.response.data : error.message);
+        console.error('Error fetching publications:', error);
         return null;
     }
+}
+
+// Function to extract only the person's publications
+function extractPublications(data, pid) {
+    const publications = data.r; // Accessing the publications
+    const articles = Array.isArray(publications) ? publications : publications ? [publications] : [];
+
+    // Filter publications where the specified PID is one of the authors
+    const myPublications = articles.filter(pub => {
+        const authors = [
+            ...(Array.isArray(pub.article?.author) ? pub.article.author : [pub.article?.author]),
+            ...(Array.isArray(pub.inproceedings?.author) ? pub.inproceedings.author : [pub.inproceedings?.author])
+        ].filter(Boolean); // Combine and filter out nulls
+
+        return authors.some(author => author.$?.pid === pid); // Check by PID
+    });
+
+    // Map to a simpler object
+    return myPublications.map(pub => {
+        const publicationType = pub.article || pub.inproceedings;
+        const type = pub.article ? 'article' : 'inproceedings'; // Determine type
+
+        return {
+            title: publicationType.title || "No Title",
+            year: publicationType.year || "No Year",
+            journal: publicationType.journal || null,
+            booktitle: publicationType.booktitle || null,
+            pages: publicationType.pages || null,
+            url: publicationType.ee || publicationType.url || null, // Handle the URL properly
+            type: type,
+        };
+    });
 }
 
 // Function to fetch data from Google Scholar via SerpAPI
@@ -79,20 +107,13 @@ async function fetchGoogleScholarData(googleScholarId) {
             author_id: googleScholarId,
             api_key: serpApiKey
         };
-        console.log('SerpAPI Request URL:', url);
-        console.log('SerpAPI Request Params:', params);
         
         const response = await axios.get(url, { params });
         const data = response.data;
-        console.log(`Google Scholar Data for Author ID ${googleScholarId}:`, data);
         return data;
     } catch (error) {
         console.error(`Error fetching Google Scholar data for ${googleScholarId}:`, 
                       error.response ? error.response.data : error.message);
-        if (error.response) {
-            console.error('Error response status:', error.response.status);
-            console.error('Error response headers:', error.response.headers);
-        }
         return null;
     }
 }
@@ -101,21 +122,21 @@ function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-
-
 // Function to fetch data for all authors in the vector
 async function fetchAuthorDetails() {
     for (const author of authorIdsVector) {
         const { googleScholarId, dblpAuthorId } = author;
 
-        // Fetch DBLP data
-        const dblpData = await fetchDblpData(dblpAuthorId);
+        // Fetch DBLP data using PID
+        const dblpPublications = await fetchPublications(dblpAuthorId);
+        console.log(`Publications for DBLP Author ID ${dblpAuthorId}:`, dblpPublications);
 
         // Fetch Google Scholar data
         const googleScholarData = await fetchGoogleScholarData(googleScholarId);
+        console.log(`Google Scholar Data for Author ID ${googleScholarId}:`, googleScholarData);
 
         console.log('------------------------------');
-        await delay(1000);
+        await delay(1000); // Delay between requests to avoid hitting rate limits
     }
 }
 
