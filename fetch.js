@@ -1,6 +1,8 @@
 import readline from 'readline';
 import axios from 'axios';
 import { parseStringPromise } from 'xml2js';
+import stringSimilarity from 'string-similarity';
+
 
 // Create an interface to read user input
 const rl = readline.createInterface({
@@ -122,21 +124,78 @@ function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function mergePublications(dblpPublications, googleScholarData) {
+    if (!dblpPublications || !googleScholarData || !googleScholarData.articles) {
+        return [];
+    }
+
+    // Convert Google Scholar data to a similar format as DBLP
+    const googleScholarPublications = googleScholarData.articles.map(article => ({
+        title: article.title,
+        year: article.year,
+        journal: article.publication,
+        url: article.link,
+        type: 'article',
+        source: 'google_scholar'
+    }));
+
+    // Mark DBLP publications with source
+    const markedDblpPubs = dblpPublications.map(pub => ({
+        ...pub,
+        source: 'dblp'
+    }));
+
+    // Initialize merged publications with DBLP data
+    let mergedPublications = [...markedDblpPubs];
+
+    // Process each Google Scholar publication
+    googleScholarPublications.forEach(scholarPub => {
+        // Check if a similar publication exists in DBLP data
+        const similarPub = markedDblpPubs.find(dblpPub => {
+            const titleSimilarity = stringSimilarity.compareTwoStrings(
+                dblpPub.title.toLowerCase(),
+                scholarPub.title.toLowerCase()
+            );
+            // Consider publications similar if titles are 85% similar and years match
+            return titleSimilarity > 0.85 && dblpPub.year === scholarPub.year;
+        });
+
+        if (similarPub) {
+            // Merge information from both sources
+            const mergedIndex = mergedPublications.findIndex(pub => pub === similarPub);
+            mergedPublications[mergedIndex] = {
+                ...similarPub,
+                urls: [
+                    similarPub.url,
+                    scholarPub.url
+                ].filter(Boolean)
+            };
+        } else {
+            // Add new publication from Google Scholar
+            mergedPublications.push(scholarPub);
+        }
+    });
+
+    return mergedPublications;
+}
+
 // Function to fetch data for all authors in the vector
 async function fetchAuthorDetails() {
     for (const author of authorIdsVector) {
         const { googleScholarId, dblpAuthorId } = author;
 
-        // Fetch DBLP data using PID
+        // Fetch DBLP data
         const dblpPublications = await fetchPublications(dblpAuthorId);
-        console.log(`Publications for DBLP Author ID ${dblpAuthorId}:`, dblpPublications);
-
+        
         // Fetch Google Scholar data
         const googleScholarData = await fetchGoogleScholarData(googleScholarId);
-        console.log(`Google Scholar Data for Author ID ${googleScholarId}:`, googleScholarData);
 
+        // Merge publications
+        const mergedPublications = mergePublications(dblpPublications, googleScholarData);
+        
+        console.log(`Merged publications for author:`, mergedPublications);
         console.log('------------------------------');
-        await delay(1000); // Delay between requests to avoid hitting rate limits
+        await delay(1000);
     }
 }
 
@@ -152,3 +211,5 @@ async function main() {
 
 // Start the process
 main();
+
+// Author IDs Vector: [ { googleScholarId: 'ko7X14wAAAAJ', dblpAuthorId: '366/4067' } ]
