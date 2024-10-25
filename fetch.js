@@ -29,17 +29,12 @@ function initializeAuthorIdsVector() {
             let count = 0;
             function askForIds() {
                 if (count < size) {
-                    rl.question(`Enter Google Scholar ID for author ${count + 1} (leave blank if not available): `, (googleScholarId) => {
-                        rl.question(`Enter DBLP author ID (PID) for author ${count + 1} (leave blank if not available): `, (dblpAuthorId) => {
-                            // Store the input in the vector only if at least one ID is provided
-                            if (!googleScholarId && !dblpAuthorId) {
-                                console.log("At least one ID must be provided. Please try again.");
-                                return askForIds(); // Ask again for valid IDs
-                            }
-
+                    rl.question(`Enter Google Scholar ID for author ${count + 1}: `, (googleScholarId) => {
+                        rl.question(`Enter DBLP author ID (PID) for author ${count + 1}: `, (dblpAuthorId) => {
+                            // Store the input in the vector
                             authorIdsVector.push({
-                                googleScholarId: googleScholarId || null,
-                                dblpAuthorId: dblpAuthorId || null
+                                googleScholarId: googleScholarId,
+                                dblpAuthorId: dblpAuthorId
                             });
                             count++;
                             askForIds(); // Continue asking for the next author
@@ -59,11 +54,6 @@ function initializeAuthorIdsVector() {
 
 // Function to fetch publications from DBLP using PID
 async function fetchPublications(dblpAuthorId) {
-    if (!dblpAuthorId) {
-        console.warn('No DBLP Author ID provided. Skipping publication fetch.');
-        return null;
-    }
-
     const url = `https://dblp.org/pid/${dblpAuthorId}.xml`; // URL for the PID
     try {
         const response = await axios.get(url);
@@ -122,11 +112,6 @@ function extractPublications(data, pid) {
 
 // Function to fetch data from Google Scholar via SerpAPI
 async function fetchGoogleScholarData(googleScholarId) {
-    if (!googleScholarId) {
-        console.warn('No Google Scholar ID provided. Skipping Google Scholar data fetch.');
-        return null;
-    }
-
     try {
         const url = 'https://serpapi.com/search.json';
         const params = {
@@ -149,99 +134,23 @@ function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// function to merge dblp and google scholars publications
-function mergePublicationsCommonFields(dblpPublications, googleScholarData) {
-    // Handle null or undefined inputs
-    const dblpPubs = dblpPublications || [];
-    const googlePubs = googleScholarData?.articles || [];
-    
-    // Function to normalize titles for comparison
-    const normalizeTitle = (title) => {
-        return title.toLowerCase()
-            .replace(/[^\w\s]/g, '')  // Remove punctuation
-            .replace(/\s+/g, ' ')     // Normalize whitespace
-            .trim();
-    };
-
-    // Function to get all URLs from a publication entry
-    const getUrls = (urlField) => {
-        if (!urlField) return [];
-        if (typeof urlField === 'string') return [urlField];
-        if (Array.isArray(urlField)) return urlField.filter(url => url);
-        return [];
-    };
-
-    // Create a map to store merged publications
-    const mergedPublicationsMap = new Map();
-    
-    // Process DBLP publications
-    dblpPubs.forEach(pub => {
-        const normalizedTitle = normalizeTitle(pub.title);
-        
-        mergedPublicationsMap.set(normalizedTitle, {
-            title: pub.title,
-            year: parseInt(pub.year) || null,
-            venue: pub.journal || pub.booktitle || '',
-            authors: [], // Will be filled from Google Scholar
-            urls: getUrls(pub.url)
-        });
-    });
-    
-    // Process and merge Google Scholar publications
-    googlePubs.forEach(pub => {
-        const normalizedTitle = normalizeTitle(pub.title);
-        const existingPub = mergedPublicationsMap.get(normalizedTitle);
-        
-        if (existingPub) {
-            // Update existing publication with Google Scholar data
-            if (pub.authors?.length > 0) {
-                existingPub.authors = pub.authors;
-            }
-            if (pub.year) {
-                existingPub.year = parseInt(pub.year) || existingPub.year;
-            }
-            if (pub.publication) {
-                existingPub.venue = existingPub.venue || pub.publication;
-            }
-            
-            // Combine URLs from both sources and remove duplicates
-            const newUrls = getUrls(pub.link);
-            existingPub.urls = [...new Set([...existingPub.urls, ...newUrls])];
-        } else {
-            // Create new entry for Google Scholar publication
-            mergedPublicationsMap.set(normalizedTitle, {
-                title: pub.title,
-                year: parseInt(pub.year) || null,
-                venue: pub.publication || '',
-                authors: pub.authors || [],
-                urls: getUrls(pub.link)
-            });
-        }
-    });
-    
-    // Convert map to array and sort by year
-    return Array.from(mergedPublicationsMap.values())
-        .sort((a, b) => (b.year || 0) - (a.year || 0));
-}
-
+// Function to fetch data for all authors in the vector
 async function fetchAuthorDetails() {
     for (const author of authorIdsVector) {
         const { googleScholarId, dblpAuthorId } = author;
-        
+
+        // Fetch DBLP data using PID
         const dblpPublications = await fetchPublications(dblpAuthorId);
+        console.log(`Publications for DBLP Author ID ${dblpAuthorId}:`, dblpPublications);
+
+        // Fetch Google Scholar data
         const googleScholarData = await fetchGoogleScholarData(googleScholarId);
-        
-        const mergedPublications = mergePublicationsCommonFields(
-            dblpPublications, 
-            googleScholarData
-        );
-        
-        console.log('Merged Publications:', mergedPublications);
-        
-        await delay(1000);
+        console.log(`Google Scholar Data for Author ID ${googleScholarId}:`, googleScholarData);
+
+        console.log('------------------------------');
+        await delay(1000); // Delay between requests to avoid hitting rate limits
     }
 }
-
 
 // Main function to control the flow
 async function main() {
