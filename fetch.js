@@ -29,12 +29,17 @@ function initializeAuthorIdsVector() {
             let count = 0;
             function askForIds() {
                 if (count < size) {
-                    rl.question(`Enter Google Scholar ID for author ${count + 1}: `, (googleScholarId) => {
-                        rl.question(`Enter DBLP author ID (PID) for author ${count + 1}: `, (dblpAuthorId) => {
-                            // Store the input in the vector
+                    rl.question(`Enter Google Scholar ID for author ${count + 1} (leave blank if not available): `, (googleScholarId) => {
+                        rl.question(`Enter DBLP author ID (PID) for author ${count + 1} (leave blank if not available): `, (dblpAuthorId) => {
+                            // Store the input in the vector only if at least one ID is provided
+                            if (!googleScholarId && !dblpAuthorId) {
+                                console.log("At least one ID must be provided. Please try again.");
+                                return askForIds(); // Ask again for valid IDs
+                            }
+
                             authorIdsVector.push({
-                                googleScholarId: googleScholarId,
-                                dblpAuthorId: dblpAuthorId
+                                googleScholarId: googleScholarId || null,
+                                dblpAuthorId: dblpAuthorId || null
                             });
                             count++;
                             askForIds(); // Continue asking for the next author
@@ -54,6 +59,11 @@ function initializeAuthorIdsVector() {
 
 // Function to fetch publications from DBLP using PID
 async function fetchPublications(dblpAuthorId) {
+    if (!dblpAuthorId) {
+        console.warn('No DBLP Author ID provided. Skipping publication fetch.');
+        return null;
+    }
+
     const url = `https://dblp.org/pid/${dblpAuthorId}.xml`; // URL for the PID
     try {
         const response = await axios.get(url);
@@ -112,6 +122,11 @@ function extractPublications(data, pid) {
 
 // Function to fetch data from Google Scholar via SerpAPI
 async function fetchGoogleScholarData(googleScholarId) {
+    if (!googleScholarId) {
+        console.warn('No Google Scholar ID provided. Skipping Google Scholar data fetch.');
+        return null;
+    }
+
     try {
         const url = 'https://serpapi.com/search.json';
         const params = {
@@ -139,13 +154,17 @@ async function fetchAuthorDetails() {
     for (const author of authorIdsVector) {
         const { googleScholarId, dblpAuthorId } = author;
 
-        // Fetch DBLP data using PID
+        // Fetch DBLP data using PID if available
         const dblpPublications = await fetchPublications(dblpAuthorId);
-        console.log(`Publications for DBLP Author ID ${dblpAuthorId}:`, dblpPublications);
+        if (dblpPublications !== null) { 
+            console.log(`Publications for DBLP Author ID ${dblpAuthorId}:`, dblpPublications);
+        }
 
-        // Fetch Google Scholar data
+        // Fetch Google Scholar data if available
         const googleScholarData = await fetchGoogleScholarData(googleScholarId);
-        console.log(`Google Scholar Data for Author ID ${googleScholarId}:`, googleScholarData);
+        if (googleScholarData !== null) { 
+            console.log(`Google Scholar Data for Author ID ${googleScholarId}:`, googleScholarData);
+        }
 
         console.log('------------------------------');
         await delay(1000); // Delay between requests to avoid hitting rate limits
